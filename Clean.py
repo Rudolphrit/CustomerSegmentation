@@ -176,3 +176,208 @@ df.shape[0]
 df.reset_index(drop=True, inplace=True)
 # Getting the number of rows in the dataframe
 df.shape[0]
+# Convert InvoiceDate to datetime type
+df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
+
+#extract date
+df['InvoiceDay'] = df['InvoiceDate'].dt.date
+
+# Find the most recent purchase date for each customer
+customer_data = df.groupby('CustomerID')['InvoiceDay'].max().reset_index()
+
+# Find the most recent date in the entire dataset
+most_recent_date = df['InvoiceDay'].max()
+
+# Convert InvoiceDay to datetime type before subtraction
+customer_data['InvoiceDay'] = pd.to_datetime(customer_data['InvoiceDay'])
+most_recent_date = pd.to_datetime(most_recent_date)
+
+# Calculate the number of days since the last purchase for each customer
+customer_data['Days_Since_Last_Purchase'] = (most_recent_date - customer_data['InvoiceDay']).dt.days
+
+# Remove the InvoiceDay column
+customer_data.drop(columns=['InvoiceDay'], inplace=True)
+customer_data.head()
+# Calculate the total number of transactions made by each customer
+total_transactions = df.groupby('CustomerID')['InvoiceNo'].nunique().reset_index()
+total_transactions.rename(columns={'InvoiceNo': 'Total_Transactions'}, inplace=True)
+
+# Calculate the total number of products purchased by each customer
+total_products_purchased = df.groupby('CustomerID')['Quantity'].sum().reset_index()
+total_products_purchased.rename(columns={'Quantity': 'Total_Products_Purchased'}, inplace=True)
+
+# Merge the new features into the customer_data dataframe
+customer_data = pd.merge(customer_data, total_transactions, on='CustomerID', how='left')
+customer_data = pd.merge(customer_data, total_products_purchased, on='CustomerID', how='left')
+
+# Display the first few rows of the customer_data dataframe
+customer_data.sample(10)
+# Calculate the total spend by each customer
+df['Total_Spend'] = df['UnitPrice'] * df['Quantity']
+total_spend = df.groupby('CustomerID')['Total_Spend'].sum().reset_index()
+
+# Calculate the average transaction value for each customer
+average_transaction_value = total_spend.merge(total_transactions, on='CustomerID')
+average_transaction_value['Average_Transaction_Value'] = average_transaction_value['Total_Spend'] / average_transaction_value['Total_Transactions']
+
+# Merge the new features into the customer_data dataframe
+customer_data = pd.merge(customer_data, total_spend, on='CustomerID')
+customer_data = pd.merge(customer_data, average_transaction_value[['CustomerID', 'Average_Transaction_Value']], on='CustomerID')
+
+# Display the first few rows of the customer_data dataframe
+customer_data.sample(5)
+# Calculate the number of unique products purchased by each customer
+unique_products_purchased = df.groupby('CustomerID')['StockCode'].nunique().reset_index()
+unique_products_purchased.rename(columns={'StockCode': 'Unique_Products_Purchased'}, inplace=True)
+
+# Merge the new feature into the customer_data dataframe
+customer_data = pd.merge(customer_data, unique_products_purchased, on='CustomerID')
+
+# Display the first few rows of the customer_data dataframe
+customer_data.head()
+# Extract day of week and hour from InvoiceDate
+df['Day_Of_Week'] = df['InvoiceDate'].dt.dayofweek
+df['Hour'] = df['InvoiceDate'].dt.hour
+
+# Calculate the average number of days between consecutive purchases
+days_between_purchases = df.groupby('CustomerID')['InvoiceDay'].apply(lambda x: (x.diff().dropna()).apply(lambda y: y.days))
+average_days_between_purchases = days_between_purchases.groupby('CustomerID').mean().reset_index()
+average_days_between_purchases.rename(columns={'InvoiceDay': 'Average_Days_Between_Purchases'}, inplace=True)
+
+# Find the favorite shopping day of the week
+favorite_shopping_day = df.groupby(['CustomerID', 'Day_Of_Week']).size().reset_index(name='Count')
+favorite_shopping_day = favorite_shopping_day.loc[favorite_shopping_day.groupby('CustomerID')['Count'].idxmax()][['CustomerID', 'Day_Of_Week']]
+
+# Find the favorite shopping hour of the day
+favorite_shopping_hour = df.groupby(['CustomerID', 'Hour']).size().reset_index(name='Count')
+favorite_shopping_hour = favorite_shopping_hour.loc[favorite_shopping_hour.groupby('CustomerID')['Count'].idxmax()][['CustomerID', 'Hour']]
+
+# Merge the new features into the customer_data dataframe
+customer_data = pd.merge(customer_data, average_days_between_purchases, on='CustomerID', how='left')
+customer_data = pd.merge(customer_data, favorite_shopping_day, on='CustomerID', how='left')
+customer_data = pd.merge(customer_data, favorite_shopping_hour, on='CustomerID', how='left')
+customer_data = customer_data.dropna(subset=['Average_Days_Between_Purchases'])
+
+# Display the first few rows of the customer_data dataframe
+customer_data.describe()
+df['Country'].value_counts(normalize=True).head()
+# Group by CustomerID and Country to get the number of transactions per country for each customer
+customer_country = df.groupby(['CustomerID', 'Country']).size().reset_index(name='Number_of_Transactions')
+
+# Get the country with the maximum number of transactions for each customer (in case a customer has transactions from multiple countries)
+customer_main_country = customer_country.sort_values('Number_of_Transactions', ascending=False).drop_duplicates('CustomerID')
+
+# Create a binary column indicating whether the customer is from the UK or not
+customer_main_country['Is_UK'] = customer_main_country['Country'].apply(lambda x: 1 if x == 'United Kingdom' else 0)
+
+# Merge this data with our customer_data dataframe
+customer_data = pd.merge(customer_data, customer_main_country[['CustomerID', 'Is_UK']], on='CustomerID', how='left')
+
+# Display the first few rows of the customer_data dataframe
+customer_data.sample(5)
+# Display feature distribution
+customer_data['Is_UK'].value_counts()
+# Calculate the total number of transactions made by each customer
+total_transactions = df.groupby('CustomerID')['InvoiceNo'].nunique().reset_index()
+
+# Calculate the number of cancelled transactions for each customer
+cancelled_transactions = df[df['Transaction_Status'] == 'Cancelled']
+cancellation_frequency = cancelled_transactions.groupby('CustomerID')['InvoiceNo'].nunique().reset_index()
+cancellation_frequency.rename(columns={'InvoiceNo': 'Cancellation_Frequency'}, inplace=True)
+#no. of cancellations per customer
+# Merge the Cancellation Frequency data into the customer_data dataframe
+customer_data = pd.merge(customer_data, cancellation_frequency, on='CustomerID', how='left')
+
+# Replace NaN values with 0 (for customers who have not cancelled any transaction)
+customer_data['Cancellation_Frequency'].fillna(0, inplace=True)
+
+# Calculate the Cancellation Rate
+customer_data['Cancellation_Rate'] = customer_data['Cancellation_Frequency'] / customer_data['Total_Transactions']
+
+# Display the first few rows of the customer_data dataframe
+customer_data.sample(5)
+# Extract month and year from InvoiceDate
+df['Year'] = df['InvoiceDate'].dt.year
+df['Month'] = df['InvoiceDate'].dt.month
+
+# Calculate monthly spending for each customer
+monthly_spending = df.groupby(['CustomerID', 'Year', 'Month'])['Total_Spend'].sum().reset_index()
+#print(monthly_spending)
+#Calculate Seasonal Buying Patterns: We are using monthly frequency as a proxy for seasonal buying patterns
+seasonal_buying_patterns = monthly_spending.groupby('CustomerID')['Total_Spend'].agg(['mean', 'std']).reset_index()
+seasonal_buying_patterns.rename(columns={'mean': 'Monthly_Spending_Mean', 'std': 'Monthly_Spending_Std'}, inplace=True)
+
+# Replace NaN values in Monthly_Spending_Std with 0, implying no variability for customers with single transaction month
+seasonal_buying_patterns['Monthly_Spending_Std'].fillna(0, inplace=True)
+
+# Calculate Trends in Spending
+# We are using the slope of the linear trend line fitted to the customer's spending over time as an indicator of spending trends
+def calculate_trend(spend_data):
+    # If there are more than one data points, we calculate the trend using linear regression
+    if len(spend_data) > 1:
+        x = np.arange(len(spend_data))
+        slope, _, _, _, _ = linregress(x, spend_data)
+        return slope
+    # If there is only one data point, no trend can be calculated, hence we return 0
+    else:
+        return 0
+
+# Apply the calculate_trend function to find the spending trend for each customer
+spending_trends = monthly_spending.groupby('CustomerID')['Total_Spend'].apply(calculate_trend).reset_index()
+spending_trends.rename(columns={'Total_Spend': 'Spending_Trend'}, inplace=True)
+#The calculated slope represents the rate of change in spending over time.
+# #Positive slopes indicate increasing spending trends, while negative slopes suggest decreasing trends.
+
+# Merge the new features into the customer_data dataframe
+customer_data = pd.merge(customer_data, seasonal_buying_patterns, on='CustomerID')
+customer_data = pd.merge(customer_data, spending_trends, on='CustomerID')
+
+# Display the first few rows of the customer_data dataframe
+customer_data.sample(5)
+# Changing the data type of 'CustomerID' to string as it is a unique identifier and not used in mathematical operations
+customer_data['CustomerID'] = customer_data['CustomerID'].astype(str)
+
+# Convert data types of columns to optimal types
+customer_data = customer_data.convert_dtypes()
+customer_data.head(10)
+# Initializing the IsolationForest model with a contamination parameter of 0.05
+model = IsolationForest(contamination=0.05, random_state=0)
+
+# Fitting the model on our dataset (converting DataFrame to NumPy to avoid warning)
+customer_data['Outlier_Scores'] = model.fit_predict(customer_data.iloc[:, 1:].to_numpy())
+
+# Creating a new column to identify outliers (1 for inliers and -1 for outliers)
+customer_data['Is_Outlier'] = [1 if x == -1 else 0 for x in customer_data['Outlier_Scores']]
+
+# Display the first few rows of the customer_data dataframe
+customer_data.head()
+# Calculate the percentage of inliers and outliers
+outlier_percentage = customer_data['Is_Outlier'].value_counts(normalize=True) * 100
+
+
+labels = ['Inlier', 'Outlier']
+
+# Plotting the pie chart
+plt.figure(figsize=(8, 6))
+plt.pie(outlier_percentage, labels=labels, autopct='%1.2f%%', colors=['blue', 'red'], startangle=140)
+
+
+plt.title('Percentage of Inliers and Outliers')
+
+# pie is drawn as a circle
+plt.axis('equal')
+
+
+plt.show()
+# Separate the outliers for analysis
+outliers_data = customer_data[customer_data['Is_Outlier'] == 1]
+
+# Remove the outliers from the main dataset
+customer_data_cleaned = customer_data[customer_data['Is_Outlier'] == 0]
+
+# Drop the 'Outlier_Scores' and 'Is_Outlier' columns
+customer_data_cleaned = customer_data_cleaned.drop(columns=['Outlier_Scores', 'Is_Outlier'])
+
+# Reset the index of the cleaned data
+customer_data_cleaned.reset_index(drop=True, inplace=True)
+print(customer_data_cleaned.tail(5))
